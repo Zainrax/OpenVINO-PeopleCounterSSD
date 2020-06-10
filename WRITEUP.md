@@ -29,9 +29,12 @@ Lighting, model accuracy, and camera focal length/image size have different effe
 
 ## Models Used
 The original three models used were YoloV3, YoloV4, YoloV3-tiny. All three were based on the [Converting Yolo models to IR](https://docs.openvinotoolkit.org/2020.1/_docs_MO_DG_prepare_model_convert_model_tf_specific_Convert_YOLO_From_Tensorflow.html)
+PB Download:
+[YoloV3](https://drive.google.com/file/d/10dqeQPN74v1lcD4v_rCuBZjw-DEhdvMZ/view?usp=sharing,%20)
+[YoloV3-Tiny](https://drive.google.com/file/d/11UlojAHVyS6v-tbTIZ4OdD2HDbJ1YxrT/view?usp=sharing,%20)
+[YoloV4](https://drive.google.com/file/d/1ST4v3x5GU-jcmINTK7IjjNgHH9XYyE_n/view?usp=sharing)
 **YoloV3 & YoloV3-Tiny**
-File Download:
-
+Procedures for converstion:
 ```
 git clone https://github.com/mystic123/tensorflow-yolo-v3.git
 cd tensorflow-yolo-v3
@@ -41,33 +44,25 @@ wget https://pjreddie.com/media/files/yolov3.weights
 wget https://pjreddie.com/media/files/yolov3-tiny.weights
 ```
 
-Pb Conversion:
+Weights to Pb Conversion:
 ```
-python3 convert_weights_pb.py --class_names coco.names --data_format NHWC --weights_file yolov3.weights
-python3 convert_weights_pb.py --class_names coco.names --data_format NHWC --weights_file yolov3-tiny.weights --tiny
+python convert_weights_pb.py --class_names coco.names --data_format NHWC --weights_file yolov3.weights
+python convert_weights_pb.py --class_names coco.names --data_format NHWC --weights_file yolov3-tiny.weights --tiny
+```
 
-```
+This step will need to be done if you downloaded the pb or converted yourself.
 
 IR Conversion:
 ```
-python3 mo_tf.py
---input_model /path/to/yolo_v3.pb
---tensorflow_use_custom_operations_config $MO_ROOT/extensions/front/tf/yolo_v3.json
---batch 1
-python3 mo_tf.py
---input_model /path/to/yolo_v3_tiny.pb
---tensorflow_use_custom_operations_config $MO_ROOT/extensions/front/tf/yolo_v3_tiny.json
---batch 1
+python3 mo_tf.py --input_model ./fronze_darknet_yolov4_model.pb --tensorflow_use_custom_operations_config $MO_ROOT/extensions/front/tf/yolo_v3.json --batch 1
+python3 mo_tf.py --input_model ./frozen_yolov3_tiny_model.pb --tensorflow_use_custom_operations_config $MO_ROOT/extensions/front/tf/yolo_v3_tiny.json --batch 1
 ```
 **YoloV4**
 Used a yolov4-tflite version [repo](https://github.com/hunglc007/tensorflow-yolov4-tflite) with weights from [here](https://drive.google.com/open?id=1cewMfusmPjYWbrnuJRuKhPMwRe_b9PaT).
 
 ```
-python convert.py --weights ./data/yolov4.weights --output ./data/yolov4-pb
-python3 mo_tf.py
---input_model /path/to/yolo_v4.pb
---tensorflow_use_custom_operations_config $MO_ROOT/extensions/front/tf/yolo_v3.json
---batch 1
+python convert.py --weights ./data/yolov4.weights --output ./frozen_yolov4_model.pb
+python3 mo_tf.py --input_model /path/to/yolo_v4.pb --tensorflow_use_custom_operations_config $MO_ROOT/extensions/front/tf/yolo_v3.json --batch 1
 ```
 While I was able to get a IR representation, the output was null, even after matching the anchors.
 The YoloV3 ended up having a 1 second inference per frame which may be due the method for parsing, but the accuracy is viable. The Tiny had 0.2 second inference which is much faster, but the accuracy went from an average of 0.8/9 to 0.4~ making it unreliable. The yolov4 outputted empty arrays due to incompatability of the conversion.
@@ -75,7 +70,9 @@ The YoloV3 ended up having a 1 second inference per frame which may be due the m
 ## Model Solution
 This  model person-detection-retail-0013 was a first choice as a backup due to it's comparatively high 88% AP vs the alternative person-detection-retail-0002, which was also larger. The IR model can be downloaded using the downloader.py
 **Download**
-```<OPENVINO_INSTALL_DIR>/deployment_tools/open_model_zoo/tools/downloader/downloader.py --name person-detection-retail-0013 --precisions FP16```
+```
+<OPENVINO_INSTALL_DIR>/deployment_tools/open_model_zoo/tools/downloader/downloader.py --name person-detection-retail-0013 --precisions FP16
+```
 
 ## Conclusion
 
