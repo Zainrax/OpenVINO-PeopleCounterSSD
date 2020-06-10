@@ -162,8 +162,17 @@ def infer_on_stream(args, client):
 
     ### TODO: Load the model through `infer_network` ###
     infer_network.load_model(args.model, args.cpu_extension, args.device)
+    # Set as camera stream
+    input = 0
+    isImage = False
+    base, ext = os.path.splitext(args.input)
+    if ext.lower() in ('.jpg', '.png', '.bmp'):
+        input = args.input
+        isImage = True
+    elif ext.lower() in ('.mp4'):
+        input = args.input
 
-    cap = cv2.VideoCapture(args.input)
+    cap = cv2.VideoCapture(input)
     cap.open(args.input)
     cap_w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     cap_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
@@ -263,6 +272,8 @@ def infer_on_stream(args, client):
         frame = cv2.resize(frame, (cap_w, cap_h))
         sys.stdout.buffer.write(frame)
         sys.stdout.flush()
+        if isImage:
+            cv2.imwrite('output.jpg', frame)
         if key_pressed == 27:
             break
     cap.release()
