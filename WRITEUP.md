@@ -31,8 +31,8 @@ Lighting, model accuracy, and camera focal length/image size have different effe
 The original three models used were YoloV3, YoloV4, YoloV3-tiny. All three were based on the [Converting Yolo models to IR](https://docs.openvinotoolkit.org/2020.1/_docs_MO_DG_prepare_model_convert_model_tf_specific_Convert_YOLO_From_Tensorflow.html)
 PB Download:
 [YoloV3](https://drive.google.com/file/d/10dqeQPN74v1lcD4v_rCuBZjw-DEhdvMZ/view?usp=sharing,%20)
-[YoloV3-Tiny](https://drive.google.com/file/d/11UlojAHVyS6v-tbTIZ4OdD2HDbJ1YxrT/view?usp=sharing,%20)
-[YoloV4](https://drive.google.com/file/d/1ST4v3x5GU-jcmINTK7IjjNgHH9XYyE_n/view?usp=sharing)
+[YoloV3-Tiny](https://drive.google.com/file/d/1ST4v3x5GU-jcmINTK7IjjNgHH9XYyE_n/view?usp=sharing)
+[YoloV4](https://drive.google.com/file/d/11UlojAHVyS6v-tbTIZ4OdD2HDbJ1YxrT/view?usp=sharing,%20)
 **YoloV3 & YoloV3-Tiny**
 Procedures for converstion:
 ```
