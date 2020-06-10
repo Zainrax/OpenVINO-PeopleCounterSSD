@@ -19,13 +19,15 @@
  WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 """
 
-
 import os
 import sys
 import time
+import math
 import socket
 import json
 import cv2
+
+import numpy as np
 
 import logging as log
 import paho.mqtt.client as mqtt
@@ -34,11 +36,97 @@ from argparse import ArgumentParser
 from inference import Network
 
 # MQTT server environment variables
-HOSTNAME = socket.gethostname()
-IPADDRESS = socket.gethostbyname(HOSTNAME)
-MQTT_HOST = IPADDRESS
+HOSTNAME = "localhost"
+IPADDRESS = socket.gethostbyaddr(HOSTNAME)
+MQTT_HOST = "localhost"
 MQTT_PORT = 3001
 MQTT_KEEPALIVE_INTERVAL = 60
+
+anchors = [
+    10, 13, 16, 30, 33, 23, 30, 61, 62, 45, 59, 119, 116, 90, 156, 198, 373,
+    326
+]
+classes = 80
+
+
+class DetectionObservation():
+    time_found = 0.0
+    last_updated = 0.0
+
+    def __init__(self, xmin, ymin, xmax, ymax, conf, label):
+        self.confidence = conf
+        self.class_id = label
+        self.xmin = xmin
+        self.ymin = ymin
+        self.xmax = xmax
+        self.ymax = ymax
+
+    def get_area(self):
+        area = (self.xmax - self.xmin) * (self.ymax - self.ymin)
+        return area
+
+    def calc_iou(self, rect):
+        min_X = min(self.xmax, rect.xmax)
+        max_X = max(self.xmin, rect.xmin)
+        min_Y = min(self.ymax, rect.ymax)
+        max_Y = max(self.ymin, rect.ymin)
+
+        area_of_intersection = abs((max_X - min_X) * (max_Y - min_Y))
+        if area_of_intersection == 0:
+            return 0
+        iou = area_of_intersection / float(rect.get_area() + self.get_area() -
+                                           area_of_intersection)
+        return iou
+
+
+def parseResult(result, threshold, w_scale, h_scale):
+    predictions = result[0][0]
+    observations = []
+    for p in predictions:
+        conf = p[2]
+        if conf > threshold:
+            print(conf)
+            label = p[1]
+            xmin = p[3] * w_scale
+            ymin = p[4] * h_scale
+            xmax = p[5] * w_scale
+            ymax = p[6] * h_scale
+            obs = DetectionObservation(xmin, ymin, xmax, ymax, conf, label)
+            observations.append(obs)
+    return observations
+
+
+def parseYoloV3(out, threshold, cap_h, cap_w):
+    observations = []
+    grid_side = out.shape[2]
+
+    offset = 0
+    if grid_side == 13:
+        offset = 2 * 6
+    if grid_side == 26:
+        offset = 2 * 3
+    if grid_side == 52:
+        offset = 2 * 0
+
+    grid = out.transpose((0, 2, 3, 1))
+    for row_idx, row in enumerate(grid[0]):
+        for col_idx, col in enumerate(row):
+            # 3 is the number of bounding boxes
+            bounding_boxes = np.split(col, 3)
+            for idx, box in enumerate(bounding_boxes):
+                x = (box[0] + col_idx) / grid_side * 416
+                y = (box[1] + row_idx) / grid_side * 416
+                w = math.exp(box[2]) * anchors[offset + 2 * idx]
+                h = math.exp(box[3]) * anchors[offset + 2 * idx + 1]
+                p = box[4]
+                if p < threshold:
+                    continue
+                class_id = np.argmax(box[5:])
+                observation = DetectionObservation(x, y, h, w, class_id, p,
+                                                   (cap_h / 416),
+                                                   (cap_w / 416))
+                observations.append(observation)
+    return observations
 
 
 def build_argparser():
@@ -48,21 +136,36 @@ def build_argparser():
     :return: command line arguments
     """
     parser = ArgumentParser()
-    parser.add_argument("-m", "--model", required=True, type=str,
+    parser.add_argument("-m",
+                        "--model",
+                        required=True,
+                        type=str,
                         help="Path to an xml file with a trained model.")
-    parser.add_argument("-i", "--input", required=True, type=str,
+    parser.add_argument("-i",
+                        "--input",
+                        required=True,
+                        type=str,
                         help="Path to image or video file")
-    parser.add_argument("-l", "--cpu_extension", required=False, type=str,
+    parser.add_argument("-l",
+                        "--cpu_extension",
+                        required=False,
+                        type=str,
                         default=None,
                         help="MKLDNN (CPU)-targeted custom layers."
-                             "Absolute path to a shared library with the"
-                             "kernels impl.")
-    parser.add_argument("-d", "--device", type=str, default="CPU",
+                        "Absolute path to a shared library with the"
+                        "kernels impl.")
+    parser.add_argument("-d",
+                        "--device",
+                        type=str,
+                        default="CPU",
                         help="Specify the target device to infer on: "
-                             "CPU, GPU, FPGA or MYRIAD is acceptable. Sample "
-                             "will look for a suitable plugin for device "
-                             "specified (CPU by default)")
-    parser.add_argument("-pt", "--prob_threshold", type=float, default=0.5,
+                        "CPU, GPU, FPGA or MYRIAD is acceptable. Sample "
+                        "will look for a suitable plugin for device "
+                        "specified (CPU by default)")
+    parser.add_argument("-pt",
+                        "--prob_threshold",
+                        type=float,
+                        default=0.5,
                         help="Probability threshold for detections filtering"
                         "(0.5 by default)")
     return parser
@@ -70,7 +173,8 @@ def build_argparser():
 
 def connect_mqtt():
     ### TODO: Connect to the MQTT client ###
-    client = None
+    client = mqtt.Client()
+    client.connect(MQTT_HOST, MQTT_PORT, MQTT_KEEPALIVE_INTERVAL)
 
     return client
 
@@ -90,31 +194,114 @@ def infer_on_stream(args, client):
     prob_threshold = args.prob_threshold
 
     ### TODO: Load the model through `infer_network` ###
+    infer_network.load_model(args.model, args.cpu_extension, args.device)
 
-    ### TODO: Handle the input stream ###
+    cap = cv2.VideoCapture(args.input)
+    cap.open(args.input)
+    cap_w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    cap_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
 
-    ### TODO: Loop until stream is over ###
+    # get frame inforamtion
+    fps = cap.get(cv2.CAP_PROP_FPS)
+    frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
 
-        ### TODO: Read from the video capture ###
+    input_shape = infer_network.get_input_shape()
+    num = input_shape[0]
+    channel = input_shape[1]
+    height = input_shape[2]
+    width = input_shape[3]
 
-        ### TODO: Pre-process the image as needed ###
+    frame_count = 0
+    people_count = 0
+    found_people = []
+    total_inference_time = []
+    while cap.isOpened():
+        people_in_frame = 0
+        frame_count += 1
+        flag, frame = cap.read()
+        curr_time = frame_count / fps
+        if not flag:
+            break
 
-        ### TODO: Start asynchronous inference for specified request ###
+        key_pressed = cv2.waitKey(60)
+        p_frame = cv2.resize(frame, (width, height))
+        p_frame = p_frame.transpose((2, 0, 1))
+        p_frame = p_frame.reshape(num, channel, height, width)
+        cv2.cvtColor(p_frame, cv2.COLOR_RGB2BGR)
 
-        ### TODO: Wait for the result ###
+        inference_time = time.time()
+        infer_network.exec_net(0, p_frame)
+        if infer_network.wait() == 0:
+            observations = []
+            outputs = infer_network.get_output()
+            total_inference_time.append(time.time() - inference_time)
+            # print(np.mean(total_inference_time))
+            # print(curr_time)
 
-            ### TODO: Get the results of the inference request ###
+            for result in outputs:
+                observations = parseResult(result, prob_threshold, cap_w,
+                                           cap_h)
 
-            ### TODO: Extract any desired stats from the results ###
+            for idx_x, obs_x in enumerate(observations):
+                if obs_x.confidence <= 0:
+                    continue
+                for idx_y, obs_y in enumerate(observations[idx_x + 1:]):
+                    intersection = obs_x.calc_iou(obs_y)
+                    if intersection >= 0.2:
+                        observations[idx_y].confidence = 0
 
-            ### TODO: Calculate and send relevant information on ###
-            ### current_count, total_count and duration to the MQTT server ###
-            ### Topic "person": keys of "count" and "total" ###
-            ### Topic "person/duration": key of "duration" ###
+            for obs in observations:
+                people_in_frame += 1
+                # class_id at 0 is Person
+                if (obs.confidence > prob_threshold):
+                    found_person = True
+                    for idx, person in enumerate(found_people):
+                        # Check previously found people
+                        intersection = obs.calc_iou(person)
+                        print(intersection)
+                        if intersection >= 0.3:
+                            # Found previous person, update position
+                            obs.time_found = person.time_found
+                            obs.last_updated = curr_time
+                            found_people[idx] = obs
+                            found_person = False
+                            break
 
-        ### TODO: Send the frame to the FFMPEG server ###
+                    # Add found person to list of activty observations
+                    if found_person or len(found_people) == 0:
+                        obs.time_found = curr_time
+                        obs.last_updated = curr_time
+                        found_people.append(obs)
+                        people_count += 1
 
-        ### TODO: Write an output image if `single_image_mode` ###
+            # Filter out people that have not been in the frame for 3 seconds
+            found_people = [
+                person for person in found_people
+                if curr_time - person.last_updated < 3
+            ]
+            print(len(found_people))
+
+            # Draw boxes
+            #for person in found_people:
+            #cv2.rectangle(frame, (person.xmin, person.ymin),
+            #             (person.xmax, person.ymax), (125, 250, 0), 1)
+
+            client.publish(
+                "person",
+                json.dumps({
+                    "count": len(found_people),
+                    "total": people_count
+                }))
+            for person in found_people:
+                t = curr_time - person.time_found
+                client.publish("person/duration", json.dumps({"duration": t}))
+        frame = cv2.resize(frame, (768, 432))
+        #sys.stdout.buffer.write(frame)
+        #sys.stdout.flush()
+        if key_pressed == 27:
+            break
+    cap.release()
+    cv2.destroyAllWindows()
 
 
 def main():

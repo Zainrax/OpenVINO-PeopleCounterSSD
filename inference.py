@@ -24,6 +24,7 @@
 
 import os
 import sys
+import time
 import logging as log
 from openvino.inference_engine import IENetwork, IECore
 
@@ -33,35 +34,65 @@ class Network:
     Load and configure inference plugins for the specified target devices 
     and performs synchronous and asynchronous modes for the specified infer requests.
     """
-
     def __init__(self):
-        ### TODO: Initialize any class variables desired ###
+        self.plugin = None
+        self.plugin_net = None
+        self.network = None
+        self.input_blob = None
+        self.output_blob = None
 
-    def load_model(self):
-        ### TODO: Load the model ###
-        ### TODO: Check for supported layers ###
-        ### TODO: Add any necessary extensions ###
-        ### TODO: Return the loaded inference plugin ###
+    def load_model(self, model_xml, cpu_ext, device):
+        print("Loading IR model into Inference Engine...")
+        self.plugin = IECore()
+        model_bin = os.path.splitext(model_xml)[0] + ".bin"
+
+        self.network = self.plugin.read_network(model=model_xml,
+                                                weights=model_bin)
+        if cpu_ext is not None:
+            self.plugin.add_extension(cpu_ext, device)
+        layers_map = self.plugin.query_network(network=self.network,
+                                               device_name=device)
+        layers = self.network.layers.keys()
+        unsupported_layers = [
+            layer for layer in layers_map if layer not in layers
+        ]
+        if len(unsupported_layers) != 0:
+            print("Found unsupported layers: {}".format(unsupported_layers))
+            print("Please check the extension for availability.")
+            exit(1)
+
+        self.plugin_net = self.plugin.load_network(self.network,
+                                                   device,
+                                                   num_requests=1000)
         ### Note: You may need to update the function parameters. ###
+        print("IR model succesfully loaded into Inference Engine.")
         return
 
     def get_input_shape(self):
-        ### TODO: Return the shape of the input layer ###
-        return
+        if self.network is not None:
+            self.input_blob = next(iter(self.network.inputs))
+            input_shape = self.network.inputs[self.input_blob].shape
+            return input_shape
+        else:
+            print("Network has not been defined")
+            exit(1)
 
-    def exec_net(self):
-        ### TODO: Start an asynchronous request ###
-        ### TODO: Return any necessary information ###
+    def exec_net(self, request_id, frame):
+        if self.input_blob is None:
+            print("Unable to make request as input not found.")
+            exit(1)
+        self.infer_request_handle = self.plugin_net.start_async(
+            request_id, inputs={self.input_blob: frame})
         ### Note: You may need to update the function parameters. ###
         return
 
     def wait(self):
-        ### TODO: Wait for the request to be complete. ###
-        ### TODO: Return any necessary information ###
+        infer_status = self.infer_request_handle.wait()
+
         ### Note: You may need to update the function parameters. ###
-        return
+        return infer_status
 
     def get_output(self):
-        ### TODO: Extract and return the output results
+        result = self.infer_request_handle.outputs.values()
         ### Note: You may need to update the function parameters. ###
-        return
+        return result
