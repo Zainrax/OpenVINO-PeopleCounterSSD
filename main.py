@@ -11,7 +11,7 @@
  The above copyright notice and this permission notice shall be
  included in all copies or substantial portions of the Software.
  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
- EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+ EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIE OF
  MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
  NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE
  LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
@@ -36,9 +36,9 @@ from argparse import ArgumentParser
 from inference import Network
 
 # MQTT server environment variables
-HOSTNAME = "localhost"
-IPADDRESS = socket.gethostbyaddr(HOSTNAME)
-MQTT_HOST = "localhost"
+HOSTNAME = socket.gethostname()
+IPADDRESS = socket.gethostbyname(HOSTNAME)
+MQTT_HOST = IPADDRESS
 MQTT_PORT = 3001
 MQTT_KEEPALIVE_INTERVAL = 60
 
@@ -56,10 +56,10 @@ class DetectionObservation():
     def __init__(self, xmin, ymin, xmax, ymax, conf, label):
         self.confidence = conf
         self.class_id = label
-        self.xmin = xmin
-        self.ymin = ymin
-        self.xmax = xmax
-        self.ymax = ymax
+        self.xmin = int(xmin)
+        self.ymin = int(ymin)
+        self.xmax = int(xmax)
+        self.ymax = int(ymax)
 
     def get_area(self):
         area = (self.xmax - self.xmin) * (self.ymax - self.ymin)
@@ -93,39 +93,6 @@ def parseResult(result, threshold, w_scale, h_scale):
             ymax = p[6] * h_scale
             obs = DetectionObservation(xmin, ymin, xmax, ymax, conf, label)
             observations.append(obs)
-    return observations
-
-
-def parseYoloV3(out, threshold, cap_h, cap_w):
-    observations = []
-    grid_side = out.shape[2]
-
-    offset = 0
-    if grid_side == 13:
-        offset = 2 * 6
-    if grid_side == 26:
-        offset = 2 * 3
-    if grid_side == 52:
-        offset = 2 * 0
-
-    grid = out.transpose((0, 2, 3, 1))
-    for row_idx, row in enumerate(grid[0]):
-        for col_idx, col in enumerate(row):
-            # 3 is the number of bounding boxes
-            bounding_boxes = np.split(col, 3)
-            for idx, box in enumerate(bounding_boxes):
-                x = (box[0] + col_idx) / grid_side * 416
-                y = (box[1] + row_idx) / grid_side * 416
-                w = math.exp(box[2]) * anchors[offset + 2 * idx]
-                h = math.exp(box[3]) * anchors[offset + 2 * idx + 1]
-                p = box[4]
-                if p < threshold:
-                    continue
-                class_id = np.argmax(box[5:])
-                observation = DetectionObservation(x, y, h, w, class_id, p,
-                                                   (cap_h / 416),
-                                                   (cap_w / 416))
-                observations.append(observation)
     return observations
 
 
@@ -275,29 +242,27 @@ def infer_on_stream(args, client):
                         people_count += 1
 
             # Filter out people that have not been in the frame for 3 seconds
+            left_people = [
+                person for person in found_people
+                if curr_time - person.last_updated >= 3
+            ]
             found_people = [
                 person for person in found_people
                 if curr_time - person.last_updated < 3
             ]
             print(len(found_people))
-
+            client.publish("person", json.dumps({"count": 1}))
             # Draw boxes
-            #for person in found_people:
-            #cv2.rectangle(frame, (person.xmin, person.ymin),
-            #             (person.xmax, person.ymax), (125, 250, 0), 1)
-
-            client.publish(
-                "person",
-                json.dumps({
-                    "count": len(found_people),
-                    "total": people_count
-                }))
             for person in found_people:
+                cv2.rectangle(frame, (person.xmin, person.ymin),
+                              (person.xmax, person.ymax), (125, 250, 0), 1)
+
+            for person in left_people:
                 t = curr_time - person.time_found
                 client.publish("person/duration", json.dumps({"duration": t}))
-        frame = cv2.resize(frame, (768, 432))
-        #sys.stdout.buffer.write(frame)
-        #sys.stdout.flush()
+        frame = cv2.resize(frame, (cap_w, cap_h))
+        sys.stdout.buffer.write(frame)
+        sys.stdout.flush()
         if key_pressed == 27:
             break
     cap.release()
