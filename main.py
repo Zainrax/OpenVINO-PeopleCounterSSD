@@ -223,7 +223,7 @@ def infer_on_stream(args, client):
                 for idx_y, obs_y in enumerate(observations[idx_x + 1:]):
                     # Check the intersection over union to find area of overlapping area
                     intersection = obs_x.calc_iou(obs_y)
-                    if intersection >= 0.6:
+                    if intersection >= 0.3:
                         observations[idx_y].confidence = 0
 
             for obs in observations:
@@ -234,13 +234,14 @@ def infer_on_stream(args, client):
                         # Check if observation is same as previously founder person.
                         intersection = obs.calc_iou(person)
                         # Check previous person is overlapping
-                        if intersection >= 0.6:
+                        if intersection >= 0.3:
                             # Found previous person, update position
                             obs.time_found = person.time_found
                             obs.last_updated = curr_time
                             found_people[idx] = obs
                             found_person = False
                             break
+
                     # Add found person to list of activty observations
                     if found_person or len(found_people) == 0:
                         obs.time_found = curr_time
@@ -251,13 +252,13 @@ def infer_on_stream(args, client):
             # Filter out people that have not been in the frame for 3 seconds
             left_people = [
                 person for person in found_people
-                if curr_time - person.last_updated >= 3
+                if curr_time - person.last_updated >= 1
             ]
             found_people = [
                 person for person in found_people
-                if curr_time - person.last_updated < 3
+                if curr_time - person.last_updated < 1
             ]
-            client.publish("person", json.dumps({"count": 1}))
+            client.publish("person", json.dumps({"count": len(found_people)}))
             # Draw boxes
             for person in found_people:
                 cv2.rectangle(frame, (person.xmin, person.ymin),
