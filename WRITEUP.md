@@ -3,8 +3,39 @@
 This reports aims to clarify the components of the provided code, as well as give my personal findings in OpenVINO. The application is able to accurately predict the number of people within a frame, the total amount of people in a given input, and the duration a person stays. The system I built is robust enough to handle fluctuations in the model inference, however further testing would need to be done to handle novel tasks such as if two people are stack on top of each other in a frame. The initial model was done using multi versions of Yolo object detection however I was unsucessful in finding a usuable version though the results were accurate, the inference after parsing the result was far too slow ranging from 0.2 using Yolov3-tiny, to up to 1 second per frame. I thus relied on the pre-trained model [person-detection-retail-0013](https://docs.openvinotoolkit.org/2019_R1/_person_detection_retail_0013_description_person_detection_retail_0013.html), though I detail the process
 
 ## Usage
+In order to run the program you will need to have the Mosca server (handles inference updates), ffserver(handles sending the frames from FFmpeg to the UI), and the web ui(displaying the results).
 
+### Mosca server
 
+```
+cd webservice/server/node-server
+node ./server.js
+```
+
+### Web UI
+
+```
+cd webservice/ui
+npm run dev
+```
+
+### FFmpeg Server
+
+```
+sudo ffserver -f ./ffmpeg/server.conf
+```
+
+### Perform Inference to UI
+
+```
+python main.py -i resources/Pedestrian_Detect_2_1_1.mp4 -m ./intel/person-detection-retail-0013/FP16/person-detection-retail-0013.xml -l /opt/intel/openvino/deployment_tools/inference_engine/lib/intel64/libcpu_extension_sse4.so -d CPU -pt 0.6 | ffmpeg -v warning -f rawvideo -pixel_format bgr24 -video_size 768x432 -framerate 24 -i - http://0.0.0.0:3004/fac.ffm
+```
+
+## Inference Techniques
+
+The model used produces a number of estimations on a given image, providing a set of xy coordinates, with a confidence. This can be  used to determine the likely hood that a given class of observation is within a certain space in a frame. Problems arise when there are several observations around given space, when in reality there is only one object. In order to elimate the possibility we can set a limit on the overlap on these varying observations. This calculation is done using Intersection over union:
+![alt Intersectionover Union](https://upload.wikimedia.org/wikipedia/commons/c/c7/Intersection_over_Union_-_visual_equation.png "test")
+Using these we remove the excess observations given a certain threshold, e.g. if two observations have an 30% IoU we eliminate one of them. In Yolo this is used to find the base observation by using the area of overlap to determine the actual object location.
 
 ## Explaining Custom Layers
 
@@ -15,7 +46,12 @@ The ability to add custom layers is key when making our models as it removes the
 
 ## Comparing Model Performance
 
-The original YoloV3 model was trained using the coco dataset with the intermediate representation(IR) using an Tensorflow implementation of yolov3, with model weights based on the same coco dataset. The IR aims to reduce the time for inference on an input, reduce the overall size of the model, while limiting the impact on accuracy. I am unable to comment on the exact impact of accuracy as I am unable to accurately compare the original model for use with the reference video provided, however, I was able to build comprehensive understanding around the difference in model size and inference time. The IR remained similar in size with 236 MB for the bin file compared to the Tensorflow .pb with 237 MB. Though the size remained similar our inference was on average 12 msec/frame, which compared to the results found in the original paper ([source](Redmon, J., & Farhadi, A. (2018) Yolov3: An incremental improvement._arXiv preprint arXiv:1804.02767_.) ) on the same input size had an average 29 msec for an inference. While the result can not be stated as a direct comparison it is clear the optimisations and inference network place a large role in improving the inference speed of a model.
+The original YoloV3 model was trained using the coco dataset with the intermediate representation(IR) using an Tensorflow implementation of yolov3, with model weights based on the same coco dataset. The IR aims to reduce the time for inference on an input, reduce the overall size of the model, while limiting the impact on accuracy. I am unable to comment on the exact impact of accuracy as I am unable to accurately compare the original model for use with the reference video provided, however, I was able to build comprehensive understanding around the difference in model size and inference time. The IR remained similar in size with 236 MB for the bin file compared to the Tensorflow .pb with 237 MB. Though the size remained similar our inference was on average 12 msec/frame, which compared to the results found in the original paper [source](https://arxiv.org/pdf/1804.02767.pdf;) (Redmon, J., & Farhadi, A. (2018) Yolov3: An incremental improvement._arXiv preprint arXiv:1804.02767_.) on the same input size had an average 29 msec for an inference. 
+|   YoloV3 | original | openvino |
+|----------|----------|----------|
+| Size     | 237MB    | 236MB    |
+| Speed    | 29msec   | 12msec   |
+While the result can not be stated as a direct comparison it is clear the optimisations and inference network place a large role in improving the inference speed of a model.
 
 ## Assess Model Use Cases
 
@@ -33,12 +69,9 @@ Lighting, model accuracy, and camera focal length/image size have different effe
 
 ## Models Used
 The original three models used were YoloV3, YoloV4, YoloV3-tiny. All three were based on the [Converting Yolo models to IR](https://docs.openvinotoolkit.org/2020.1/_docs_MO_DG_prepare_model_convert_model_tf_specific_Convert_YOLO_From_Tensorflow.html)
-PB Download:
-[YoloV3](https://drive.google.com/file/d/10dqeQPN74v1lcD4v_rCuBZjw-DEhdvMZ/view?usp=sharing,%20)
-[YoloV3-Tiny](https://drive.google.com/file/d/1ST4v3x5GU-jcmINTK7IjjNgHH9XYyE_n/view?usp=sharing)
-[YoloV4](https://drive.google.com/file/d/11UlojAHVyS6v-tbTIZ4OdD2HDbJ1YxrT/view?usp=sharing,%20)
 **YoloV3 & YoloV3-Tiny**
-Procedures for converstion:
+File Download:
+
 ```
 git clone https://github.com/mystic123/tensorflow-yolo-v3.git
 cd tensorflow-yolo-v3
@@ -48,25 +81,33 @@ wget https://pjreddie.com/media/files/yolov3.weights
 wget https://pjreddie.com/media/files/yolov3-tiny.weights
 ```
 
-Weights to Pb Conversion:
+Pb Conversion:
 ```
-python convert_weights_pb.py --class_names coco.names --data_format NHWC --weights_file yolov3.weights
-python convert_weights_pb.py --class_names coco.names --data_format NHWC --weights_file yolov3-tiny.weights --tiny
-```
+python3 convert_weights_pb.py --class_names coco.names --data_format NHWC --weights_file yolov3.weights
+python3 convert_weights_pb.py --class_names coco.names --data_format NHWC --weights_file yolov3-tiny.weights --tiny
 
-This step will need to be done if you downloaded the pb or converted yourself.
+```
 
 IR Conversion:
 ```
-python3 mo_tf.py --input_model ./fronze_darknet_yolov4_model.pb --tensorflow_use_custom_operations_config $MO_ROOT/extensions/front/tf/yolo_v3.json --batch 1
-python3 mo_tf.py --input_model ./frozen_yolov3_tiny_model.pb --tensorflow_use_custom_operations_config $MO_ROOT/extensions/front/tf/yolo_v3_tiny.json --batch 1
+python3 mo_tf.py
+--input_model /path/to/yolo_v3.pb
+--tensorflow_use_custom_operations_config $MO_ROOT/extensions/front/tf/yolo_v3.json
+--batch 1
+python3 mo_tf.py
+--input_model /path/to/yolo_v3_tiny.pb
+--tensorflow_use_custom_operations_config $MO_ROOT/extensions/front/tf/yolo_v3_tiny.json
+--batch 1
 ```
 **YoloV4**
 Used a yolov4-tflite version [repo](https://github.com/hunglc007/tensorflow-yolov4-tflite) with weights from [here](https://drive.google.com/open?id=1cewMfusmPjYWbrnuJRuKhPMwRe_b9PaT).
 
 ```
-python convert.py --weights ./data/yolov4.weights --output ./frozen_yolov4_model.pb
-python3 mo_tf.py --input_model /path/to/yolo_v4.pb --tensorflow_use_custom_operations_config $MO_ROOT/extensions/front/tf/yolo_v3.json --batch 1
+python convert.py --weights ./data/yolov4.weights --output ./data/yolov4-pb
+python3 mo_tf.py
+--input_model /path/to/yolo_v4.pb
+--tensorflow_use_custom_operations_config $MO_ROOT/extensions/front/tf/yolo_v3.json
+--batch 1
 ```
 While I was able to get a IR representation, the output was null, even after matching the anchors.
 The YoloV3 ended up having a 1 second inference per frame which may be due the method for parsing, but the accuracy is viable. The Tiny had 0.2 second inference which is much faster, but the accuracy went from an average of 0.8/9 to 0.4~ making it unreliable. The yolov4 outputted empty arrays due to incompatability of the conversion.
@@ -74,9 +115,7 @@ The YoloV3 ended up having a 1 second inference per frame which may be due the m
 ## Model Solution
 This  model person-detection-retail-0013 was a first choice as a backup due to it's comparatively high 88% AP vs the alternative person-detection-retail-0002, which was also larger. The IR model can be downloaded using the downloader.py
 **Download**
-```
-<OPENVINO_INSTALL_DIR>/deployment_tools/open_model_zoo/tools/downloader/downloader.py --name person-detection-retail-0013 --precisions FP16
-```
+```<OPENVINO_INSTALL_DIR>/deployment_tools/open_model_zoo/tools/downloader/downloader.py --name person-detection-retail-0013 --precisions FP16```
 
 ## Conclusion
 
