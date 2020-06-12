@@ -85,7 +85,6 @@ def parseResult(result, threshold, w_scale, h_scale):
     for p in predictions:
         conf = p[2]
         if conf > threshold:
-            print(conf)
             label = p[1]
             xmin = p[3] * w_scale
             ymin = p[4] * h_scale
@@ -217,32 +216,31 @@ def infer_on_stream(args, client):
             for result in outputs:
                 observations = parseResult(result, prob_threshold, cap_w,
                                            cap_h)
-
+            # Remove observations from results that overlap
             for idx_x, obs_x in enumerate(observations):
                 if obs_x.confidence <= 0:
                     continue
                 for idx_y, obs_y in enumerate(observations[idx_x + 1:]):
+                    # Check the intersection over union to find area of overlapping area
                     intersection = obs_x.calc_iou(obs_y)
-                    if intersection >= 0.2:
+                    if intersection >= 0.6:
                         observations[idx_y].confidence = 0
 
             for obs in observations:
                 people_in_frame += 1
-                # class_id at 0 is Person
                 if (obs.confidence > prob_threshold):
                     found_person = True
                     for idx, person in enumerate(found_people):
-                        # Check previously found people
+                        # Check if observation is same as previously founder person.
                         intersection = obs.calc_iou(person)
-                        print(intersection)
-                        if intersection >= 0.3:
+                        # Check previous person is overlapping
+                        if intersection >= 0.6:
                             # Found previous person, update position
                             obs.time_found = person.time_found
                             obs.last_updated = curr_time
                             found_people[idx] = obs
                             found_person = False
                             break
-
                     # Add found person to list of activty observations
                     if found_person or len(found_people) == 0:
                         obs.time_found = curr_time
@@ -259,7 +257,6 @@ def infer_on_stream(args, client):
                 person for person in found_people
                 if curr_time - person.last_updated < 3
             ]
-            print(len(found_people))
             client.publish("person", json.dumps({"count": 1}))
             # Draw boxes
             for person in found_people:

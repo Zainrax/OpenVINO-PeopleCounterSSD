@@ -2,6 +2,10 @@
 
 This reports aims to clarify the components of the provided code, as well as give my personal findings in OpenVINO. The application is able to accurately predict the number of people within a frame, the total amount of people in a given input, and the duration a person stays. The system I built is robust enough to handle fluctuations in the model inference, however further testing would need to be done to handle novel tasks such as if two people are stack on top of each other in a frame. The initial model was done using multi versions of Yolo object detection however I was unsucessful in finding a usuable version though the results were accurate, the inference after parsing the result was far too slow ranging from 0.2 using Yolov3-tiny, to up to 1 second per frame. I thus relied on the pre-trained model [person-detection-retail-0013](https://docs.openvinotoolkit.org/2019_R1/_person_detection_retail_0013_description_person_detection_retail_0013.html), though I detail the process
 
+## Usage
+
+
+
 ## Explaining Custom Layers
 
 The process behind converting custom layers depends on the framework one uses for a given model. 
